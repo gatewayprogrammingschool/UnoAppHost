@@ -17,12 +17,6 @@ global using Microsoft.Extensions.FileProviders;
 global using Microsoft.Extensions.Hosting.Internal;
 global using Microsoft.Extensions.Logging;
 global using Microsoft.Extensions.Options;
-global using Microsoft.UI.Dispatching;
-global using Microsoft.UI.Xaml;
 
-global using WinRT;
-
-global using UnhandledExceptionEventArgs = Microsoft.UI.Xaml.UnhandledExceptionEventArgs;
-
-global using CommunityToolkit.Extensions.Hosting;
-global using CommunityToolkit.Extensions.Hosting.Properties;
+global using Uno.Extensions.Hosting;
+global using Uno.Extensions.Hosting.Properties;

@@ -9,7 +9,7 @@ Allows hosting a Windows App SDK Application in an `IHost` that manages the life
 __(Convert existing project or the default template's output)__
 
 1. Add `<DefineConstants>DISABLE_XAML_GENERATED_MAIN</DefineConstants>` in the main `PropertyGroup` of your applications project file.
-2. Add reference to `CommunityToolkit.Extensions.Hosting.WindowsAppSdk`
+2. Add reference to `Uno.Extensions.Hosting.WindowsAppSdk`
 3. Add `Program.cs` to the root of your application project.
 4. Add this code to the `Program.cs`:
 
@@ -44,7 +44,7 @@ public static class Program
     x:Class="HostedWindowsAppSdk.App"
     xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-    xmlns:host="using:CommunityToolkit.Extensions.Hosting"
+    xmlns:host="using:Uno.Extensions.Hosting"
     xmlns:local="using:HostedWindowsAppSdk">
     <Application.Resources>
     </Application.Resources>

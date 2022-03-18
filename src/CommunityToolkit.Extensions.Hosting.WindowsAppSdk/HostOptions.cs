@@ -3,7 +3,7 @@
 
 using Microsoft.Extensions.Hosting;
 
-namespace CommunityToolkit.Extensions.Hosting;
+namespace Uno.Extensions.Hosting;
 
 
 /// <summary>
@@ -35,9 +35,9 @@ public class HostOptions
 
     internal void Initialize(IConfiguration configuration)
     {
-        var timeoutSeconds = configuration["shutdownTimeoutSeconds"];
+        string timeoutSeconds = configuration["shutdownTimeoutSeconds"];
         if (!string.IsNullOrEmpty(timeoutSeconds)
-            && int.TryParse(timeoutSeconds, NumberStyles.None, CultureInfo.InvariantCulture, out var seconds))
+            && int.TryParse(timeoutSeconds, NumberStyles.None, CultureInfo.InvariantCulture, out int seconds))
         {
             ShutdownTimeout = TimeSpan.FromSeconds(seconds);
         }

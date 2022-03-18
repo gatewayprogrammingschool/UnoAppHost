@@ -9,30 +9,36 @@ using Microsoft.Extensions.Hosting;
 
 // ReSharper disable NotAccessedField.Local
 
-namespace CommunityToolkit.Extensions.Hosting;
+namespace Uno.Extensions.Hosting;
 
-internal sealed class WindowsAppSdkHost<TApp> : IHost, IAsyncDisposable
+using Windows.UI.Xaml;
+
+
+internal sealed class UnoAppHost<TApp> : IHost, IAsyncDisposable
     where TApp : Application, new()
 {
-    private readonly ILogger<WindowsAppSdkHost<TApp>> _logger;
+    private readonly ILogger<UnoAppHost<TApp>> _logger;
     private readonly IHostLifetime _hostLifetime;
-    private readonly ApplicationLifetime _applicationLifetime;
+    private readonly ApplicationLifetime? _applicationLifetime;
     private readonly HostOptions _options;
     private readonly IHostEnvironment _hostEnvironment;
     private readonly PhysicalFileProvider _defaultProvider;
-    private IEnumerable<IHostedService> _hostedServices;
+    private IEnumerable<IHostedService>? _hostedServices;
     private volatile bool _stopCalled;
 
-    public WindowsAppSdkHost(IServiceProvider services,
+    public UnoAppHost(IServiceProvider services,
                 IHostEnvironment hostEnvironment,
                 PhysicalFileProvider defaultProvider,
                 IHostApplicationLifetime applicationLifetime,
-                ILogger<WindowsAppSdkHost<TApp>> logger,
+                ILogger<UnoAppHost<TApp>> logger,
                 IHostLifetime hostLifetime,
                 IOptions<HostOptions> options)
     {
         Services = services ?? throw new ArgumentNullException(nameof(services));
-        _applicationLifetime = (applicationLifetime ?? throw new ArgumentNullException(nameof(applicationLifetime))) as ApplicationLifetime;
+        _applicationLifetime
+            = (applicationLifetime ??
+               throw new ArgumentNullException(nameof(applicationLifetime))) as
+            ApplicationLifetime;
         _hostEnvironment = hostEnvironment;
         _defaultProvider = defaultProvider;
 
@@ -54,65 +60,74 @@ internal sealed class WindowsAppSdkHost<TApp> : IHost, IAsyncDisposable
     {
         //_logger.Starting();
 
-        using var combinedCancellationTokenSource = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, _applicationLifetime.ApplicationStopping);
-        var combinedCancellationToken = combinedCancellationTokenSource.Token;
-
-        await _hostLifetime.WaitForStartAsync(combinedCancellationToken).ConfigureAwait(false);
-
-        combinedCancellationToken.ThrowIfCancellationRequested();
-        _hostedServices = Services.GetService<IEnumerable<IHostedService>>()!;
-
-        foreach (var hostedService in _hostedServices)
+        if (_applicationLifetime is not null)
         {
-            // Fire IHostedService.Start
-            await hostedService.StartAsync(combinedCancellationToken).ConfigureAwait(false);
+            using CancellationTokenSource combinedCancellationTokenSource = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, _applicationLifetime.ApplicationStopping);
+            CancellationToken combinedCancellationToken = combinedCancellationTokenSource.Token;
 
-            if (hostedService is BackgroundService backgroundService)
+            try
             {
-                _ = TryExecuteBackgroundServiceAsync(backgroundService);
+                await _hostLifetime.WaitForStartAsync(combinedCancellationToken).ConfigureAwait(false);
+
+                combinedCancellationToken.ThrowIfCancellationRequested();
             }
-        }
-
-        HostOptions.XamlCheckProcessRequirements();
-
-        ComWrappersSupport.InitializeComWrappers();
-
-        void OnAppOnUnhandledException(object sender, UnhandledExceptionEventArgs args)
-        {
-            _logger.LogCritical(args.Exception, "Unhandled exception.  Terminating.");
-            args.Handled = false;
-            RequestExit(combinedCancellationTokenSource);
-        }
-
-        Application.Start(
-            _ =>
+            catch
             {
-                var context = new DispatcherQueueSynchronizationContext(
-                    DispatcherQueue.GetForCurrentThread()
-                );
-                SynchronizationContext.SetSynchronizationContext(context);
-                var app = Services.GetRequiredService<TApp>();
+                //ignore
+            }
+            _hostedServices = Services.GetService<IEnumerable<IHostedService>>()!;
 
-                if (app is CancelableApplication ca)
+            foreach (IHostedService hostedService in _hostedServices)
+            {
+                // Fire IHostedService.Start
+                await hostedService.StartAsync(combinedCancellationToken).ConfigureAwait(false);
+
+                if (hostedService is BackgroundService backgroundService)
                 {
-                    ca.Services = Services;
-                    ca.Token = combinedCancellationToken;
+                    _ = TryExecuteBackgroundServiceAsync(backgroundService);
                 }
+            }
 
-                app.UnhandledException += OnAppOnUnhandledException;
+            //HostOptions.XamlCheckProcessRequirements();
+
+            void OnAppOnUnhandledException(object sender, Windows.UI.Xaml.UnhandledExceptionEventArgs args)
+            {
+                _logger.LogCritical((Exception?)args.Exception, "Unhandled exception.  Terminating.");
+                RequestExit(combinedCancellationTokenSource);
+            }
+
+            //Windows.UI.Xaml.Application.Start(static _ => Program._app = new App());
+            Application.Start(
+                _ =>
+                {
+                    //var context = new DispatcherQueueSynchronizationContext(
+                    //    DispatcherQueue.GetForCurrentThread()
+                    //);
+                    //SynchronizationContext.SetSynchronizationContext(context);
+                    TApp app = Services.GetRequiredService<TApp>();
+
+                    // ReSharper disable once SuspiciousTypeConversion.Global
+                    if (app is CancelableApplication ca)
+                    {
+                        ca.Services = Services;
+                        ca.Token = combinedCancellationToken;
+                    }
+
+                    app.UnhandledException += OnAppOnUnhandledException;
 
                     // Fire IHostApplicationLifetime.Started
                     _applicationLifetime.NotifyStarted();
-            }
-        );
+                }
+            );
 
-        _logger.LogInformation("Application is exiting.");
-        RequestExit(combinedCancellationTokenSource);
+            _logger.LogInformation("Application is exiting.");
+            RequestExit(combinedCancellationTokenSource);
+        }
     }
 
     private async Task RequestExit(CancellationTokenSource source)
     {
-        var token = source.Token;
+        CancellationToken token = source.Token;
         token.ThrowIfCancellationRequested();
         source.CancelAfter(TimeSpan.FromMinutes(1));
         try
@@ -154,17 +169,17 @@ internal sealed class WindowsAppSdkHost<TApp> : IHost, IAsyncDisposable
         _stopCalled = true;
         //_logger.Stopping();
 
-        using var cts = new CancellationTokenSource(_options.ShutdownTimeout);
-        using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(cts.Token, cancellationToken);
+        using CancellationTokenSource cts = new(_options.ShutdownTimeout);
+        using CancellationTokenSource linkedCts = CancellationTokenSource.CreateLinkedTokenSource(cts.Token, cancellationToken);
 
-        var token = linkedCts.Token;
+        CancellationToken token = linkedCts.Token;
         // Trigger IHostApplicationLifetime.ApplicationStopping
         _applicationLifetime.StopApplication();
 
         IList<Exception> exceptions = new List<Exception>();
         if (_hostedServices != null) // Started?
         {
-            foreach (var hostedService in _hostedServices.Reverse())
+            foreach (IHostedService hostedService in _hostedServices.Reverse())
             {
                 try
                 {
@@ -192,7 +207,7 @@ internal sealed class WindowsAppSdkHost<TApp> : IHost, IAsyncDisposable
 
         if (exceptions.Count > 0)
         {
-            var ex = new AggregateException("One or more hosted services failed to stop.", exceptions);
+            AggregateException ex = new("One or more hosted services failed to stop.", exceptions);
             //_logger.StoppedWithException(ex);
             throw ex;
         }

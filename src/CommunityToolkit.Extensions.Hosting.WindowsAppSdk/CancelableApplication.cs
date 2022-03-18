@@ -1,8 +1,10 @@
-namespace CommunityToolkit.Extensions.Hosting;
+namespace Uno.Extensions.Hosting;
+
+using Windows.UI.Xaml;
 
 public class CancelableApplication : Application
 {
-    public IServiceProvider Services
+    public IServiceProvider? Services
     {
         get; internal set;
     }
@@ -26,5 +28,5 @@ public class CancelableApplication : Application
     }
 
 
-    public event Action Exiting;
+    public event Action? Exiting;
 }

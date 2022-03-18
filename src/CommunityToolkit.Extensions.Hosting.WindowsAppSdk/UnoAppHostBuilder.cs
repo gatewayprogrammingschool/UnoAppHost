@@ -5,13 +5,14 @@
 
 using Microsoft.Extensions.Hosting;
 
-namespace CommunityToolkit.Extensions.Hosting;
+namespace Uno.Extensions.Hosting;
 
+using Application = Windows.UI.Xaml.Application;
 
 /// <summary>
 /// A program initialization utility.
 /// </summary>
-public sealed class WindowsAppSdkHostBuilder<TApp> : IHostBuilder
+public sealed class UnoAppHostBuilder<TApp> : IHostBuilder
     where TApp : Application, new()
     {
         private readonly List<Action<IConfigurationBuilder>> _configureHostConfigActions = new();
@@ -20,12 +21,12 @@ public sealed class WindowsAppSdkHostBuilder<TApp> : IHostBuilder
         private readonly List<IConfigureContainerAdapter> _configureContainerActions = new();
         private IServiceProviderFactory<IServiceCollection> _serviceProviderFactory = new DefaultServiceProviderFactory();
         private bool _hostBuilt;
-        private IConfiguration _hostConfiguration;
-        private IConfiguration _appConfiguration;
-        private HostBuilderContext _hostBuilderContext;
-        private HostingEnvironment _hostingEnvironment;
-        private IServiceProvider _appServices;
-        private PhysicalFileProvider _defaultProvider;
+        private IConfiguration? _hostConfiguration;
+        private IConfiguration? _appConfiguration;
+        private HostBuilderContext? _hostBuilderContext;
+        private HostingEnvironment? _hostingEnvironment;
+        private IServiceProvider? _appServices;
+        private PhysicalFileProvider? _defaultProvider;
 
         /// <summary>
         /// A central location for sharing state between components during the host building process.
@@ -68,7 +69,7 @@ public sealed class WindowsAppSdkHostBuilder<TApp> : IHostBuilder
         public IHostBuilder ConfigureServices(Action<HostBuilderContext, IServiceCollection> configureDelegate)
         {
             _configureServicesActions.Add(
-                (_, collection) =>
+                static (_, collection) =>
                 {
                     collection.AddSingleton<TApp>();
                 });
@@ -80,6 +81,7 @@ public sealed class WindowsAppSdkHostBuilder<TApp> : IHostBuilder
         public IHostBuilder UseServiceProviderFactory<TContainerBuilder>(
             IServiceProviderFactory<TContainerBuilder> factory
         )
+            where TContainerBuilder : notnull
         {
             if (factory is IServiceProviderFactory<IServiceCollection> spf)
             {
@@ -93,7 +95,12 @@ public sealed class WindowsAppSdkHostBuilder<TApp> : IHostBuilder
             Func<HostBuilderContext, IServiceProviderFactory<TContainerBuilder>> factory
         )
         {
-            if(factory(_hostBuilderContext) is IServiceProviderFactory<IServiceCollection> spf)
+            if (factory is null)
+            {
+                throw new ArgumentNullException(nameof(factory));
+            }
+
+            if(_hostBuilderContext is not null && factory(_hostBuilderContext) is IServiceProviderFactory<IServiceCollection> spf)
             {
                 _serviceProviderFactory = spf;
             }
@@ -106,7 +113,12 @@ public sealed class WindowsAppSdkHostBuilder<TApp> : IHostBuilder
             Action<HostBuilderContext, TContainerBuilder> configureDelegate
         )
         {
-            if (_serviceProviderFactory is TContainerBuilder builder)
+            if (_serviceProviderFactory is not TContainerBuilder builder)
+            {
+                return this;
+            }
+
+            if (_hostBuilderContext is not null)
             {
                 configureDelegate(_hostBuilderContext, builder);
             }
@@ -128,7 +140,7 @@ public sealed class WindowsAppSdkHostBuilder<TApp> : IHostBuilder
 
             // REVIEW: If we want to raise more events outside of these calls then we will need to
             // stash this in a field.
-            using var diagnosticListener = new DiagnosticListener("Microsoft.Extensions.Hosting");
+            using DiagnosticListener diagnosticListener = new("Microsoft.Extensions.Hosting");
             const string hostBuildingEventName = "HostBuilding";
             const string hostBuiltEventName = "HostBuilt";
 
@@ -143,13 +155,20 @@ public sealed class WindowsAppSdkHostBuilder<TApp> : IHostBuilder
             BuildAppConfiguration();
             CreateServiceProvider();
 
-            var host = _appServices.GetRequiredService<IHost>();
-            if (diagnosticListener.IsEnabled() && diagnosticListener.IsEnabled(hostBuiltEventName))
+            if (_appServices is not null)
             {
-                Write(diagnosticListener, hostBuiltEventName, host);
+                IHost host = _appServices.GetRequiredService<IHost>();
+                if (diagnosticListener.IsEnabled() && diagnosticListener.IsEnabled(hostBuiltEventName))
+                {
+                    UnoAppHostBuilder<TApp>.Write(diagnosticListener, hostBuiltEventName, host);
+                }
+
+                return host;
             }
 
-            return host;
+#pragma warning disable CS8603
+            return null;
+#pragma warning restore CS8603
         }
 
         [UnconditionalSuppressMessage("ReflectionAnalysis", "IL2026:UnrecognizedReflectionPattern",
@@ -164,10 +183,10 @@ public sealed class WindowsAppSdkHostBuilder<TApp> : IHostBuilder
 
         private void BuildHostConfiguration()
         {
-            var configBuilder = new ConfigurationBuilder()
+            IConfigurationBuilder configBuilder = new ConfigurationBuilder()
                 .AddInMemoryCollection(); // Make sure there's some default storage since there are no default providers
 
-            foreach (var buildAction in _configureHostConfigActions)
+            foreach (Action<IConfigurationBuilder> buildAction in _configureHostConfigActions)
             {
                 buildAction(configBuilder);
             }
@@ -176,34 +195,38 @@ public sealed class WindowsAppSdkHostBuilder<TApp> : IHostBuilder
 
         private void CreateHostingEnvironment()
         {
-            _hostingEnvironment = new HostingEnvironment
+            if (_hostConfiguration is not null)
             {
-                ApplicationName = _hostConfiguration[HostDefaults.ApplicationKey],
-                EnvironmentName = _hostConfiguration[HostDefaults.EnvironmentKey] ?? Environments.Production,
-                ContentRootPath = ResolveContentRootPath(_hostConfiguration[HostDefaults.ContentRootKey], AppContext.BaseDirectory),
-            };
+                _hostingEnvironment = new()
+                {
+                    ApplicationName = _hostConfiguration[HostDefaults.ApplicationKey],
+                    EnvironmentName = _hostConfiguration[HostDefaults.EnvironmentKey] ??
+                                      Environments.Production,
+                    ContentRootPath = UnoAppHostBuilder<TApp>.ResolveContentRootPath(
+                        _hostConfiguration[HostDefaults.ContentRootKey],
+                        AppContext.BaseDirectory
+                    ),};
+            }
 
-            if (string.IsNullOrEmpty(_hostingEnvironment.ApplicationName))
+            if (_hostingEnvironment is not null && string.IsNullOrEmpty(_hostingEnvironment.ApplicationName))
             {
                 // Note GetEntryAssembly returns null for the net4x console test runner.
                 _hostingEnvironment.ApplicationName = Assembly.GetEntryAssembly()?.GetName().Name;
             }
 
-            _hostingEnvironment.ContentRootFileProvider = _defaultProvider = new PhysicalFileProvider(_hostingEnvironment.ContentRootPath);
+            if (_hostingEnvironment is not null)
+            {
+                _hostingEnvironment.ContentRootFileProvider = _defaultProvider
+                    = new PhysicalFileProvider(_hostingEnvironment.ContentRootPath);
+            }
         }
 
-        private string ResolveContentRootPath(string contentRootPath, string basePath)
-        {
-            if (string.IsNullOrEmpty(contentRootPath))
-            {
-                return basePath;
-            }
-            if (Path.IsPathRooted(contentRootPath))
-            {
-                return contentRootPath;
-            }
-            return Path.Combine(Path.GetFullPath(basePath), contentRootPath);
-        }
+        private static string ResolveContentRootPath(string contentRootPath, string basePath)
+            => string.IsNullOrEmpty(contentRootPath)
+                ? basePath
+                : Path.IsPathRooted(contentRootPath)
+                    ? contentRootPath
+                    : Path.Combine(Path.GetFullPath(basePath), contentRootPath);
 
         private void CreateHostBuilderContext()
         {
@@ -216,11 +239,11 @@ public sealed class WindowsAppSdkHostBuilder<TApp> : IHostBuilder
 
         private void BuildAppConfiguration()
         {
-            var configBuilder = new ConfigurationBuilder()
+            IConfigurationBuilder configBuilder = new ConfigurationBuilder()
                 .SetBasePath(_hostingEnvironment.ContentRootPath)
-                .AddConfiguration(_hostConfiguration, shouldDisposeConfiguration: true);
+                .AddConfiguration(_hostConfiguration, true);
 
-            foreach (var buildAction in _configureAppConfigActions)
+            foreach (Action<HostBuilderContext, IConfigurationBuilder> buildAction in _configureAppConfigActions)
             {
                 buildAction(_hostBuilderContext, configBuilder);
             }
@@ -230,7 +253,7 @@ public sealed class WindowsAppSdkHostBuilder<TApp> : IHostBuilder
 
         private void CreateServiceProvider()
         {
-            var services = new ServiceCollection();
+            ServiceCollection services = new();
 #pragma warning disable CS0618 // Type or member is obsolete
             services.AddSingleton<IHostingEnvironment>(_hostingEnvironment);
 #pragma warning restore CS0618 // Type or member is obsolete
@@ -239,31 +262,33 @@ public sealed class WindowsAppSdkHostBuilder<TApp> : IHostBuilder
             // register configuration as factory to make it dispose with the service provider
             services.AddSingleton(_ => _appConfiguration);
 #pragma warning disable CS0618 // Type or member is obsolete
-            services.AddSingleton(s => (IApplicationLifetime)s.GetService<IHostApplicationLifetime>());
+            services.AddSingleton(
+                static s => (IApplicationLifetime)s.GetService<IHostApplicationLifetime>()!
+            );
 #pragma warning restore CS0618 // Type or member is obsolete
             services.AddSingleton<IHostApplicationLifetime, ApplicationLifetime>();
 
             AddLifetime(services);
 
-            services.AddSingleton<IHost>(_ => new WindowsAppSdkHost<TApp>(_appServices,
+            services.AddSingleton<IHost>(_ => new UnoAppHost<TApp>(_appServices,
                 _hostingEnvironment,
                 _defaultProvider,
                 _appServices.GetRequiredService<IHostApplicationLifetime>(),
-                _appServices.GetRequiredService<ILogger<WindowsAppSdkHost<TApp>>>(),
+                _appServices.GetRequiredService<ILogger<UnoAppHost<TApp>>>(),
                 _appServices.GetRequiredService<IHostLifetime>(),
                 _appServices.GetRequiredService<IOptions<HostOptions>>())
             );
             services.AddOptions().Configure<HostOptions>(options => { options.Initialize(_hostConfiguration); });
             services.AddLogging();
 
-            foreach (var configureServicesAction in _configureServicesActions)
+            foreach (Action<HostBuilderContext, IServiceCollection> configureServicesAction in _configureServicesActions)
             {
                 configureServicesAction(_hostBuilderContext, services);
             }
 
-            var containerBuilder = _serviceProviderFactory.CreateBuilder(services);
+            IServiceCollection containerBuilder = _serviceProviderFactory.CreateBuilder(services);
 
-            foreach (var containerAction in _configureContainerActions)
+            foreach (IConfigureContainerAdapter containerAction in _configureContainerActions)
             {
                 containerAction.ConfigureContainer(_hostBuilderContext, containerBuilder);
             }
@@ -284,9 +309,9 @@ public sealed class WindowsAppSdkHostBuilder<TApp> : IHostBuilder
             services.AddSingleton<IHostLifetime, ConsoleLifetime>();
         }
 
-        private string GetResourceString(string resourceName)
+        private string? GetResourceString(string resourceName)
         {
-            var strings = new ResourceManager(typeof(Resources));
+            ResourceManager strings = new(typeof(Resources));
             return strings.GetString(resourceName);
         }
     }

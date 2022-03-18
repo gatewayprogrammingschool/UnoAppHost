@@ -1,0 +1,30 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <AllowUnsafeBlocks>True</AllowUnsafeBlocks>
+    <TargetFrameworks>net6.0;</TargetFrameworks>
+    <LangVersion>10.0</LangVersion>
+    <Nullable>enable</Nullable>
+    <RootNamespace>Uno.Extensions.Hosting</RootNamespace>
+    <Company>Payton Byrd (The Sharp Ninja) &lt;ninja@thesharp.ninja&gt;</Company>
+    <Copyright>2022 - All Rights Reserved</Copyright>
+    <TargetPlatformResourceVersion>0.0</TargetPlatformResourceVersion>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Compile Remove="IServiceFactoryAdapter.cs" />
+    <Compile Remove="ServiceFactoryAdapter.cs" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="GitVersion.MsBuild" Version="5.7.0">
+      <PrivateAssets>all</PrivateAssets>
+      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+    </PackageReference>
+    <PackageReference Include="Microsoft.Extensions.Hosting" Version="6.0.0" />
+    <PackageReference Include="Microsoft.Extensions.Hosting.Abstractions" Version="6.0.0" />
+    <PackageReference Include="Microsoft.WindowsAppSDK" Version="1.0.0" />
+    <PackageReference Include="Uno.UI" Version="4.1.8" />
+  </ItemGroup>
+
+</Project>
