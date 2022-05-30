@@ -58,26 +58,19 @@ internal sealed class UnoAppHost<TApp> : IHost, IAsyncDisposable
 
     public async Task StartAsync(CancellationToken cancellationToken = default)
     {
-        //_logger.Starting();
+        //        _logger.Starting();
 
         if (_applicationLifetime is not null)
         {
             using CancellationTokenSource combinedCancellationTokenSource = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, _applicationLifetime.ApplicationStopping);
             CancellationToken combinedCancellationToken = combinedCancellationTokenSource.Token;
 
-            try
-            {
-                await _hostLifetime.WaitForStartAsync(combinedCancellationToken).ConfigureAwait(false);
+            await _hostLifetime.WaitForStartAsync(combinedCancellationToken).ConfigureAwait(false);
 
-                combinedCancellationToken.ThrowIfCancellationRequested();
-            }
-            catch
-            {
-                //ignore
-            }
+            combinedCancellationToken.ThrowIfCancellationRequested();
             _hostedServices = Services.GetService<IEnumerable<IHostedService>>()!;
 
-            foreach (IHostedService hostedService in _hostedServices)
+            foreach (var hostedService in _hostedServices)
             {
                 // Fire IHostedService.Start
                 await hostedService.StartAsync(combinedCancellationToken).ConfigureAwait(false);
@@ -88,40 +81,58 @@ internal sealed class UnoAppHost<TApp> : IHost, IAsyncDisposable
                 }
             }
 
-            //HostOptions.XamlCheckProcessRequirements();
+            HostOptions.XamlCheckProcessRequirements();
 
-            void OnAppOnUnhandledException(object sender, Windows.UI.Xaml.UnhandledExceptionEventArgs args)
+            ComWrappersSupport.InitializeComWrappers();
+
+            void OnAppOnUnhandledException(object sender, UnhandledExceptionEventArgs args)
             {
-                _logger.LogCritical((Exception?)args.Exception, "Unhandled exception.  Terminating.");
+                _logger.LogCritical(args.Exception, "Unhandled exception.  Terminating.");
+                args.Handled = false;
                 RequestExit(combinedCancellationTokenSource);
             }
 
-            //Windows.UI.Xaml.Application.Start(static _ => Program._app = new App());
-            Application.Start(
-                _ =>
-                {
-                    //var context = new DispatcherQueueSynchronizationContext(
-                    //    DispatcherQueue.GetForCurrentThread()
-                    //);
-                    //SynchronizationContext.SetSynchronizationContext(context);
-                    TApp app = Services.GetRequiredService<TApp>();
-
-                    // ReSharper disable once SuspiciousTypeConversion.Global
-                    if (app is CancelableApplication ca)
+            //try
+            {
+                Application.Start(
+                    _ =>
                     {
-                        ca.Services = Services;
-                        ca.Token = combinedCancellationToken;
+                        try
+                        {
+                            var context = new DispatcherQueueSynchronizationContext(
+                                DispatcherQueue.GetForCurrentThread()
+                            );
+                            SynchronizationContext.SetSynchronizationContext(context);
+                            var app = Services.GetRequiredService<TApp>();
+
+                            app.UnhandledException += OnAppOnUnhandledException;
+
+                            if (app is CancelableApplication ca)
+                            {
+                                ca.Services = Services;
+                                ca.Token = combinedCancellationToken;
+                            }
+
+                            // Fire IHostApplicationLifetime.Started
+                            _applicationLifetime.NotifyStarted();
+                        }
+                        catch (Exception e)
+                        {
+                            _logger.LogError(e, "Error while executing (in lambda).");
+                        }
                     }
+                );
+            }
 
-                    app.UnhandledException += OnAppOnUnhandledException;
-
-                    // Fire IHostApplicationLifetime.Started
-                    _applicationLifetime.NotifyStarted();
-                }
-            );
-
-            _logger.LogInformation("Application is exiting.");
-            RequestExit(combinedCancellationTokenSource);
+            try
+            {
+                _logger.LogInformation("Application is exiting.");
+                RequestExit(combinedCancellationTokenSource);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error while exiting.");
+            }
         }
     }
 

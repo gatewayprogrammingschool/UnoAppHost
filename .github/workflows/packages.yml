@@ -10,11 +10,12 @@ on:
   workflow_dispatch:
 
 jobs:
-  publish-to-github:
+  prepare:
     runs-on: windows-2022
-    if: ${{ github.event_name != 'release' }}
     env:
       ARTIFACT_FOLDER: "${{ github.workspace }}/nuget"
+    outputs:
+      VERSION: "${{ steps.version.VERSION }}"
     steps:
     - name: Event
       env:       
@@ -23,10 +24,10 @@ jobs:
     - name: Checkout
       uses: actions/checkout@v1
       
-    - name: Setup .NET
-      uses: actions/setup-dotnet@v1
-      with:
-        dotnet-version: 6.0.x
+    # - name: Setup .NET
+    #   uses: actions/setup-dotnet@v1
+    #   with:
+    #     dotnet-version: 6.0.x
         
     - name: Setup MSBuild.exe
       uses: microsoft/setup-msbuild@master
@@ -34,76 +35,74 @@ jobs:
         vs-prerelease: true
         vs-version: 17
         
-    - name: Setup Scoop
+    - name: Setup GitVersion
       run: |
-        iwr -useb get.scoop.sh | iex
-        scoop install gitversion
-        GitVersion
-        
+        dotnet tool install gitversion.tool -g
+        dotnet-gitversion
     - name: Restore dependencies
-      run: dotnet restore
+      run: msbuild /t:restore
       
     - name: Build Debug
       run: msbuild /t:build /p:Configuration=Debug /p:PackageOutputPath="${{ env.ARTIFACT_FOLDER }}" /p:IncludeSource=true src/CommunityToolkit.Extensions.Hosting.WindowsAppSdk/CommunityToolkit.Extensions.Hosting.WindowsAppSdk.csproj
-      
-    - name: GitHub Packages
-      uses: tanaka-takayoshi/nuget-publish-to-github-packages-action@v2.1
+  
+    - name: Upload a Build Artifact
+      uses: actions/upload-artifact@v3.0.0
       with:
-        # Path of NuPkg
-        nupkg-path: '${{ env.ARTIFACT_FOLDER }}/*.nupkg'
-        # package repository owner
-        repo-owner: sharpninja
-        # user account
-        gh-user: sharpninja
-        # access token
-        token: ${{ secrets.GITHUB_TOKEN }}
-        # skip publishing duplicated package(s)
-        skip-duplicate: true
+        name: artifacts
+        path: ${{ env.ARTIFACT_FOLDER }}
+
+  publish-to-github:
+    runs-on: windows-2022
+    if: ${{ github.event_name != 'release' }}
+    needs: prepare
+    env:
+      ARTIFACT_FOLDER: "${{ github.workspace }}/nuget"
+    steps:
+    - name: Checkout
+      uses: actions/checkout@v1
+    - name: Setup GitVersion
+      run: dotnet tool install gitversion.tool -g
+    - name: Download a Build Artifact
+      uses: actions/download-artifact@v3.0.0
+      with:
+        name: artifacts
+        path: ${{ env.ARTIFACT_FOLDER }}
+    - run: dir ${{ env.ARTIFACT_FOLDER }} -recurse
+    - name: Nuget Publish
+      env:
+        TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      run: |
+        $NugetVersionV2=& dotnet-gitversion . /showvariable NuGetVersionV2
+        $githubUrl="https://nuget.pkg.github.com/OWNER/index.json"
+        & dotnet nuget add source --username sharpninja --password $env:TOKEN --store-password-in-clear-text --name github $githubUrl
+        $nupkgs = GCI SharpNinja.Extensions.WindowsAppSdkHost.${NuGetVersionV2}.symbols.nupkg -Path $env:ARTIFACT_FOLDER -ErrorAction Stop -Verbose
+        $nupkgs | foreach-object -Verbose -process { `
+          & dotnet nuget push "$_" -k "$env:TOKEN" --source github --skip-duplicate
+        }
 
   publish-to-nuget:
     runs-on: windows-2022
     if: ${{ github.event_name == 'release' }}
+    needs: prepare
     env:
       ARTIFACT_FOLDER: "${{ github.workspace }}/nuget"
     steps:
-    - name: Event
-      env:       
-        event_name: ${{ github.event_name }}
-      run: echo "event_name $env:event_name"
     - name: Checkout
       uses: actions/checkout@v1
-      
-    - name: Setup .NET
-      uses: actions/setup-dotnet@v1
+    - name: Setup GitVersion
+      run: dotnet tool install gitversion.tool -g
+    - name: Download a Build Artifact
+      uses: actions/download-artifact@v3.0.0
       with:
-        dotnet-version: 6.0.x
-        
-    - name: Setup MSBuild.exe
-      uses: microsoft/setup-msbuild@master
-      with:
-        vs-prerelease: true
-        vs-version: 17
-        
-    - name: Setup Scoop
-      run: |
-        iwr -useb get.scoop.sh | iex
-        scoop install gitversion
-        GitVersion
-        
-    - name: Restore dependencies
-      run: dotnet restore
-      
-    - name: Build
-      run: msbuild /t:build /p:Configuration=Release /p:PackageOutputPath="$env:ARTIFACT_FOLDER" /p:IncludeSource=true src/CommunityToolkit.Extensions.Hosting.WindowsAppSdk/CommunityToolkit.Extensions.Hosting.WindowsAppSdk.csproj
-        
-    - name: Attach nuget packages to Github releases
-      uses: softprops/action-gh-release@v1
-      with:
-        files: "${{ env.ARTIFACT_FOLDER }}/*.symbols.nupkg"
-
+        name: artifacts
+        path: ${{ env.ARTIFACT_FOLDER }}
+    - run: dir ${{ env.ARTIFACT_FOLDER }} -recurse
     - name: Nuget Publish
       env:
         nuget_token: ${{ secrets.NUGET_TOKEN }}
       run: |
-        $nupkgs = GCI *.symbols.nupkg -Path $env:ARTIFACT_FOLDER -ErrorAction Stop -Verbose
-        $nupkgs | foreach-object -Verbose -process { & dotnet nuget push "$_" -k "$env:NUGET_TOKEN" --source "https://api.nuget.org/v3/index.json" --skip-duplicate}
+        $NugetVersionV2=& dotnet-gitversion . /showvariable NuGetVersionV2
+        $nupkgs = GCI SharpNinja.Extensions.WindowsAppSdkHost.${NuGetVersionV2}.symbols.nupkg -Path $env:ARTIFACT_FOLDER -ErrorAction Stop -Verbose
+        $nupkgs | foreach-object -Verbose -process { `
+          & dotnet nuget push "$_" -k "$env:NUGET_TOKEN" --source "https://api.nuget.org/v3/index.json" --skip-duplicate
+        }
